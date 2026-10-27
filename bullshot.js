@@ -44,36 +44,63 @@ function parseAkun() {
 }
 
 // ─── TWITTER POST ─────────────────────────────────────────────────────────────
+const TW_QUERY_ID = '7TKRKCPuAGsmYde0CudbVg';
+const TW_FEATURES = {
+  communities_web_enable_tweet_community_results_fetch: true,
+  c9s_tweet_anatomy_moderator_badge_enabled: true,
+  responsive_web_edit_tweet_api_enabled: true,
+  graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+  view_counts_everywhere_api_enabled: true,
+  longform_notetweets_consumption_enabled: true,
+  responsive_web_twitter_article_tweet_consumption_enabled: true,
+  tweet_awards_web_tipping_enabled: false,
+  creator_subscriptions_quote_tweet_preview_enabled: false,
+  longform_notetweets_rich_text_read_enabled: true,
+  longform_notetweets_inline_media_enabled: true,
+  articles_preview_enabled: true,
+  rweb_video_timestamps_enabled: true,
+  rweb_tipjar_consumption_enabled: true,
+  responsive_web_graphql_exclude_directive_enabled: true,
+  verified_phone_label_enabled: false,
+  freedom_of_speech_not_reach_the_sky_enabled: true,
+  standardized_nudges_misinfo: true,
+  tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+  responsive_web_enhance_cards_enabled: false,
+};
+
 async function postTweet(authToken, ct0, text, attachUrl = null) {
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 20000);
-  try {
-    const params = new URLSearchParams({ status: text });
-    if (attachUrl) params.append('attachment_url', attachUrl);
+  const variables = {
+    tweet_text: text,
+    media: { media_entities: [], possibly_sensitive: false },
+    semantic_annotation_ids: [],
+    disallowed_reply_controls: [],
+    ...(attachUrl ? { attachment_url: attachUrl } : {}),
+  };
 
-    const res = await fetch('https://api.twitter.com/1.1/statuses/update.json', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${TW_BEARER}`,
-        'Cookie': `auth_token=${authToken}; ct0=${ct0}`,
-        'X-Csrf-Token': ct0,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
-        'Origin': 'https://twitter.com',
-        'Referer': 'https://twitter.com/',
-        'X-Twitter-Active-User': 'yes',
-        'X-Twitter-Auth-Type': 'OAuth2Session',
-      },
-      body: params.toString(),
-      signal: ctrl.signal,
-    });
+  const res = await fetch(`https://api.x.com/graphql/${TW_QUERY_ID}/CreateTweet`, {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${TW_BEARER}`,
+      'cookie': `auth_token=${authToken}; ct0=${ct0}`,
+      'x-csrf-token': ct0,
+      'content-type': 'application/json',
+      'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+      'x-twitter-active-user': 'yes',
+      'x-twitter-client-language': 'id',
+      'origin': 'https://x.com',
+      'referer': 'https://x.com/',
+    },
+    body: JSON.stringify({ variables, features: TW_FEATURES, queryId: TW_QUERY_ID }),
+  });
 
-    const data = await res.json();
-    if (!data.id_str) throw new Error(data.errors?.[0]?.message || `HTTP ${res.status}`);
-    const username = data.user?.screen_name || 'unknown';
-    const url = `https://x.com/${username}/status/${data.id_str}?s=20`;
-    return url;
-  } finally { clearTimeout(to); }
+  const data = await res.json();
+  if (data.errors) throw new Error(JSON.stringify(data.errors));
+  const tweetId = data?.data?.create_tweet?.tweet_results?.result?.rest_id;
+  if (!tweetId) throw new Error('No tweet ID: ' + JSON.stringify(data));
+  const username = data?.data?.create_tweet?.tweet_results?.result?.core?.user_results?.result?.legacy?.screen_name;
+  return `https://x.com/${username}/status/${tweetId}`;
 }
 
 // ─── BULLSHOT API ─────────────────────────────────────────────────────────────
