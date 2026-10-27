@@ -93,7 +93,7 @@ async function mineLoop(session) {
       for (const pos of positions) {
         if (pos.status === 'completed' || (pos.remainingSeconds !== undefined && pos.remainingSeconds <= 0)) {
           try {
-            const collected = await api('POST', '/api/mining/collect', { positionId: pos.id }, address, token);
+            const collected = await api('POST', `/api/mining/positions/${pos.id}/collect`, null, address, token);
             console.log(`${tag} [✓] Collected: ${pos.locationName} | Rewards: ${JSON.stringify(collected?.rewards || collected)}`);
           } catch (e) {
             console.log(`${tag} [!] Collect failed: ${e.message}`);
@@ -122,7 +122,7 @@ async function mineLoop(session) {
         continue;
       }
 
-      const started = await api('POST', '/api/mining/start', { locationId: loc.id }, address, token);
+      const started = await api('POST', '/api/mining/positions', { locationId: loc.id }, address, token);
       console.log(`${tag} [⛏] Started: ${loc.name || loc.id} | Duration: ${loc.durationSeconds}s | Energy cost: ${loc.energyCost}`);
 
       await sleep((loc.durationSeconds + 5) * 1000);
@@ -154,15 +154,14 @@ async function main() {
   let selectedKeys = [];
 
   if (mode === '1') {
-    keys.forEach((k, i) => console.log(`  [${i}] ${new Wallet(k).address}`));
-    const idx = parseInt(await prompt('Index akun: '));
-    selectedKeys = [keys[idx]];
+    const idx = parseInt(await prompt(`Nomor akun (1-${keys.length}): `));
+    selectedKeys = [keys[idx - 1]];
   } else if (mode === '2') {
     selectedKeys = keys;
   } else if (mode === '3') {
-    const from = parseInt(await prompt(`From index (0-${keys.length - 1}): `));
-    selectedKeys = keys.slice(from);
-    console.log(`[*] Running wallet ${from} → ${keys.length - 1}`);
+    const from = parseInt(await prompt(`Mulai dari akun nomor (1-${keys.length}): `));
+    selectedKeys = keys.slice(from - 1);
+    console.log(`[*] Running wallet ${from} → ${keys.length}`);
   } else {
     console.log('[!] Invalid'); process.exit(1);
   }
