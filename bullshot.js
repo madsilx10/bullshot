@@ -209,7 +209,7 @@ async function main() {
     .split('\n').map(l => l.trim()).filter(Boolean);
 
   const usernames = fs.existsSync('usn.txt')
-    ? fs.readFileSync('usn.txt', 'utf-8').split('\n').map(l => l.trim()).filter(Boolean)
+    ? fs.readFileSync('usn.txt', 'utf-8').split('\n').map(l => l.trim().replace(/^@/, '')).filter(Boolean)
     : [];
 
   console.log(`Wallets : ${keys.length}`);
