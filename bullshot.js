@@ -381,30 +381,29 @@ async function main() {
   // Ambil selected
   const allSelected = selectKeys(keys, scope, from);
 
-  // Login
-  console.log(`\n→ Login ${allSelected.length} wallet...`);
-  const sessions = [];
-  for (const { key, idx } of allSelected) {
-    try {
-      const s = await login(key);
-      s.username  = usernames[idx] || null;
-      s.twCreds   = akunList[idx]  || null;
-      s.acctIdx   = idx;
-      console.log(`[${sessions.length + 1}/${allSelected.length}] ${s.address} | Energy: ${s.user.energy}/${s.user.energyCapacity} | Twitter: ${s.user.twitterHandle || '-'}`);
-      sessions.push(s);
-    } catch (e) {
-      console.error(`[${sessions.length + 1}/${allSelected.length}] Login error: ${e.message}`);
-    }
-    await accountDelay();
-  }
-  console.log(`\n${sessions.length}/${allSelected.length} berhasil login\n`);
-
+  const total = allSelected.length;
   let totalGems = 0;
 
-  for (let i = 0; i < sessions.length; i++) {
-    const s = sessions[i];
-    const tag = `[${i + 1}/${sessions.length}][${s.address.slice(0, 8)}...]`;
+  for (let i = 0; i < total; i++) {
+    const { key, idx } = allSelected[i];
+    const num = `[${i + 1}/${total}]`;
 
+    // Login
+    let s;
+    try {
+      s = await login(key);
+      s.username = usernames[idx] || null;
+      s.twCreds  = akunList[idx]  || null;
+      s.acctIdx  = idx;
+      console.log(`\n${num} ${s.address} | Energy: ${s.user.energy}/${s.user.energyCapacity} | Twitter: ${s.user.twitterHandle || '-'}`);
+    } catch (e) {
+      console.error(`${num} Login error: ${e.message}`);
+      continue;
+    }
+
+    const tag = `${num}[${s.address.slice(0, 8)}...]`;
+
+    // Action
     try {
       if (mode === '1') {
         await doMining(s, tag);
@@ -422,7 +421,7 @@ async function main() {
       console.error(`${tag} Error: ${e.message}`);
     }
 
-    if (i < sessions.length - 1) await accountDelay();
+    if (i < total - 1) await accountDelay();
   }
 
   if (mode === '3') console.log(`\nTotal GEMS claimed: ${totalGems}`);
