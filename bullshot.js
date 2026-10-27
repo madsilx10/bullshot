@@ -118,43 +118,45 @@ async function doTasks(session, tag, twitterHandle) {
   }
 
   // Get quests
-  let quests;
+  let raw;
   try {
-    quests = await api('GET', '/api/quests', null, address, token);
+    raw = await api('GET', '/api/quests', null, address, token);
   } catch (e) {
     console.log(`${tag} [Quest] GET failed: ${e.message}`);
     return;
   }
 
-  // Handle berbagai shape response
-  if (!Array.isArray(quests)) {
-    quests = quests.quests || quests.data || quests.list || Object.values(quests);
-  }
-  if (!Array.isArray(quests)) {
-    console.log(`${tag} [Quest] Unexpected response shape`);
-    return;
-  }
+  // Flatten daily + weekly + oneTime, skip verify_tweet (butuh URL asli)
+  const allQuests = [
+    ...(raw.daily   || []),
+    ...(raw.weekly  || []),
+    ...(raw.oneTime || []),
+  ];
 
-  const doable = quests.filter(q => q.status !== 'completed' && !q.isCompleted);
+  const QUEST_WHITELIST = ['daily_miner_signin', 'tw_daily_engage'];
+
+  const doable = allQuests.filter(q =>
+    QUEST_WHITELIST.includes(q.id) &&
+    q.status === 'available'
+  );
+
   if (doable.length === 0) {
-    console.log(`${tag} [Quest] All done`);
+    console.log(`${tag} [Quest] All done / nothing to do`);
     return;
   }
 
   for (const quest of doable) {
-    const qid = quest.id || quest.questId;
+    const qid = quest.id;
     try {
-      // Start
       const started = await api('POST', '/api/quests/start', { questId: qid }, address, token);
       const wait = (started.delaySeconds || started.secondsLeft || 10) + 2;
-      console.log(`${tag} [Quest] Started: ${qid} | wait ${wait}s`);
+      console.log(`${tag} [Quest] Started: ${quest.title} | wait ${wait}s`);
       await sleep(wait * 1000);
 
-      // Claim
       const claimed = await api('POST', '/api/quests/claim', { questId: qid, tweetUrl: '' }, address, token);
-      console.log(`${tag} [Quest] Claimed: ${qid} | +${claimed.reward?.gems || 0} GEMS +${claimed.reward?.xp || 0} XP`);
+      console.log(`${tag} [Quest] Claimed: ${quest.title} | +${claimed.reward?.gems || 0} GEMS +${claimed.reward?.xp || 0} XP`);
     } catch (e) {
-      console.log(`${tag} [Quest] ${qid} error: ${e.message}`);
+      console.log(`${tag} [Quest] ${quest.title} error: ${e.message}`);
     }
     await randomDelay();
   }
