@@ -4,7 +4,6 @@ const readline = require('readline');
 
 const BASE_URL = 'https://gemapi.bullshot.io';
 const REF_CODE = '0x413c3593';
-const LOGIN_DELAY = 2000;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -15,13 +14,13 @@ function getHeaders(address = '', token = '') {
     'Referer': 'https://gem.bullshot.io/',
     'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
     ...(address ? { 'X-Wallet-Address': address } : {}),
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...(token  ? { 'Authorization': `Bearer ${token}` } : {}),
   };
 }
 
 async function api(method, path, body, address, token) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const to = setTimeout(() => controller.abort(), 15000);
   try {
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
@@ -34,155 +33,163 @@ async function api(method, path, body, address, token) {
     try { data = JSON.parse(text); } catch { throw new Error(`Non-JSON: ${text.slice(0, 100)}`); }
     if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
     return data;
-  } finally {
-    clearTimeout(timeout);
-  }
+  } finally { clearTimeout(to); }
 }
 
-async function connectWallet(privateKey) {
+async function login(privateKey) {
   const wallet = new Wallet(privateKey.trim());
   const address = wallet.address;
 
-  console.log(`\n[+] Processing: ${address}`);
-
   const ban = await api('GET', `/api/user/check-ban/${address}`, null, address);
-  if (ban.banned || ban.isBanned) { console.log(`[!] BANNED, skip`); return null; }
+  if (ban.banned || ban.isBanned) throw new Error('BANNED');
 
   const { message } = await api('POST', '/api/auth/nonce', { walletAddress: address }, address);
   const signature = await wallet.signMessage(message);
-
   const { token, user } = await api('POST', '/api/auth/login', {
     walletAddress: address, message, signature, refCode: REF_CODE,
   }, address);
 
-  console.log(`[✓] Login OK | ${user.username} | Gems: ${user.gems} | Energy: ${user.energy}/${user.energyCapacity}`);
   return { address, token, user };
 }
 
-function pickBestLocation(locations, energy, miningPower) {
-  const unlocked = locations.filter(l =>
-    !l.isLocked &&
-    l.energyCost <= energy &&
-    l.miningPowerRequired <= miningPower
-  );
-  if (!unlocked.length) return null;
-  // Pilih yang GEMS reward tertinggi
-  return unlocked.sort((a, b) =>
-    (b.rewardRanges?.GEMS?.max || 0) - (a.rewardRanges?.GEMS?.max || 0)
-  )[0];
+function pickLocation(locations, energy, miningPower) {
+  return locations
+    .filter(l => !l.isLocked && l.name && l.durationSeconds >= 600
+      && l.energyCost <= energy && l.miningPowerRequired <= miningPower)
+    .sort((a, b) => {
+      const g = (b.rewardRanges?.GEMS?.max || 0) - (a.rewardRanges?.GEMS?.max || 0);
+      return g !== 0 ? g : b.durationSeconds - a.durationSeconds;
+    })[0] || null;
 }
 
-async function mineLoop(session) {
-  const { address, token } = session;
-  const tag = `[${address.slice(0, 8)}...]`;
-
-  console.log(`\n${tag} Starting mine loop...`);
-
-  const locations = await api('GET', '/api/mining/locations', null, address, token);
-
-  while (true) {
+// ─── MODE 1: MINE ────────────────────────────────────────────────────────────
+// Start mining tiap wallet, ga nunggu selesai
+async function modeMine(sessions) {
+  console.log(`\n[MINE] ${sessions.length} wallet(s)`);
+  for (let i = 0; i < sessions.length; i++) {
+    const num = `[${i + 1}/${sessions.length}]`;
     try {
-      // Cek stats
-      const stats = await api('GET', '/api/mining/stats', null, address, token);
-      console.log(`${tag} Energy: ${stats.energy} | ActivePos: ${stats.activePositions} | TotalMined: ${stats.totalMined}`);
+      const { address, token, user } = sessions[i];
+      console.log(`${num} ${address} | Energy: ${user.energy}/${user.energyCapacity}`);
 
-      // Cek active positions
       const positions = await api('GET', '/api/mining/positions', null, address, token);
+      const active = positions.filter(p => p.status === 'active');
 
-      // Collect yang sudah selesai
-      for (const pos of positions) {
-        if (pos.status === 'completed' || (pos.remainingSeconds !== undefined && pos.remainingSeconds <= 0)) {
-          try {
-            const collected = await api('POST', `/api/mining/positions/${pos.id}/collect`, null, address, token);
-            console.log(`${tag} [✓] Collected: ${pos.locationName} | Rewards: ${JSON.stringify(collected?.rewards || collected)}`);
-          } catch (e) {
-            console.log(`${tag} [!] Collect failed: ${e.message}`);
-          }
-        }
-      }
-
-      // Cek active yang masih jalan
-      const active = positions.filter(p => p.status === 'active' && p.remainingSeconds > 0);
       if (active.length > 0) {
         const soonest = active.sort((a, b) => a.remainingSeconds - b.remainingSeconds)[0];
-        const waitSec = soonest.remainingSeconds + 5;
-        console.log(`${tag} Mining at ${soonest.locationName} | Done in ${soonest.remainingSeconds}s → wait ${waitSec}s`);
-        await sleep(waitSec * 1000);
-        continue;
+        console.log(`  → Already mining: ${soonest.locationName} | ${soonest.remainingSeconds}s left`);
+      } else {
+        const locations = await api('GET', '/api/mining/locations', null, address, token);
+        const stats = await api('GET', '/api/mining/stats', null, address, token);
+        const loc = pickLocation(locations, stats.energy, stats.miningPower);
+
+        if (!loc) {
+          console.log(`  → No location available (energy: ${stats.energy})`);
+        } else {
+          await api('POST', '/api/mining/positions', { locationId: loc.id }, address, token);
+          console.log(`  → Started: ${loc.name} | ${loc.durationSeconds}s | -${loc.energyCost} energy`);
+        }
       }
-
-      // Refresh stats setelah collect
-      const freshStats = await api('GET', '/api/mining/stats', null, address, token);
-
-      // Start mine baru
-      const loc = pickBestLocation(locations, freshStats.energy, freshStats.miningPower);
-      if (!loc) {
-        console.log(`${tag} [!] No location available (energy: ${freshStats.energy}), wait 60s...`);
-        await sleep(60000);
-        continue;
-      }
-
-      const started = await api('POST', '/api/mining/positions', { locationId: loc.id }, address, token);
-      console.log(`${tag} [⛏] Started: ${loc.name || loc.id} | Duration: ${loc.durationSeconds}s | Energy cost: ${loc.energyCost}`);
-
-      await sleep((loc.durationSeconds + 5) * 1000);
-
     } catch (e) {
-      console.error(`${tag} [!] Error: ${e.message} — retry in 30s`);
-      await sleep(30000);
+      console.error(`${num} Error: ${e.message}`);
     }
+    await sleep(1500);
   }
+  console.log(`\n[MINE] Done.`);
 }
 
+// ─── MODE 2: CLAIM ───────────────────────────────────────────────────────────
+// Claim semua position yang sudah selesai
+async function modeClaim(sessions) {
+  console.log(`\n[CLAIM] ${sessions.length} wallet(s)`);
+  let totalGems = 0;
+  for (let i = 0; i < sessions.length; i++) {
+    const num = `[${i + 1}/${sessions.length}]`;
+    try {
+      const { address, token } = sessions[i];
+
+      const positions = await api('GET', '/api/mining/positions', null, address, token);
+      const claimable = positions.filter(p =>
+        p.status === 'completed' || (p.remainingSeconds !== undefined && p.remainingSeconds <= 0)
+      );
+
+      if (claimable.length === 0) {
+        const active = positions.filter(p => p.status === 'active');
+        if (active.length > 0) {
+          const soonest = active.sort((a, b) => a.remainingSeconds - b.remainingSeconds)[0];
+          console.log(`${num} ${address} → Still mining: ${soonest.remainingSeconds}s left`);
+        } else {
+          console.log(`${num} ${address} → Nothing to claim`);
+        }
+      } else {
+        for (const pos of claimable) {
+          const res = await api('POST', `/api/mining/positions/${pos.id}/claim`, null, address, token);
+          const gems = res.gemsEarned || 0;
+          totalGems += gems;
+          console.log(`${num} ${address} → Claimed: ${pos.locationName} | +${gems} GEMS | Rewards: ${res.rewards?.join(', ')}`);
+          await sleep(500);
+        }
+      }
+    } catch (e) {
+      console.error(`${num} Error: ${e.message}`);
+    }
+    await sleep(1500);
+  }
+  console.log(`\n[CLAIM] Done. Total gems earned: ${totalGems}`);
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function prompt(q) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(res => rl.question(q, ans => { rl.close(); res(ans.trim()); }));
+}
+
+function selectKeys(keys, mode, from) {
+  if (mode === '1') return [keys[from - 1]];
+  if (mode === '2') return keys;
+  if (mode === '3') return keys.slice(from - 1);
+  return keys;
 }
 
 async function main() {
   const keys = fs.readFileSync('wallet.txt', 'utf-8')
     .split('\n').map(l => l.trim()).filter(Boolean);
 
-  console.log(`[*] Total wallets: ${keys.length}`);
-  console.log(`\nPilih mode:`);
-  console.log(`  1. 1 akun (pilih index)`);
-  console.log(`  2. Semua akun`);
+  console.log(`Wallets: ${keys.length}`);
+  console.log(`\nAkun:`);
+  console.log(`  1. 1 akun`);
+  console.log(`  2. Semua`);
   console.log(`  3. From X to end`);
 
-  const mode = await prompt('\nPilihan (1/2/3): ');
+  const scope = await prompt('\nPilih (1/2/3): ');
+  let from = 1;
+  if (scope === '1') from = parseInt(await prompt(`Nomor akun (1-${keys.length}): `));
+  else if (scope === '3') from = parseInt(await prompt(`Mulai dari nomor (1-${keys.length}): `));
 
-  let selectedKeys = [];
+  const selected = selectKeys(keys, scope, from);
+  console.log(`\n→ Login ${selected.length} wallet...`);
 
-  if (mode === '1') {
-    const idx = parseInt(await prompt(`Nomor akun (1-${keys.length}): `));
-    selectedKeys = [keys[idx - 1]];
-  } else if (mode === '2') {
-    selectedKeys = keys;
-  } else if (mode === '3') {
-    const from = parseInt(await prompt(`Mulai dari akun nomor (1-${keys.length}): `));
-    selectedKeys = keys.slice(from - 1);
-    console.log(`[*] Running wallet ${from} → ${keys.length}`);
-  } else {
-    console.log('[!] Invalid'); process.exit(1);
-  }
-
-  // Login semua dulu
-  console.log(`\n[*] Logging in ${selectedKeys.length} wallet(s)...`);
   const sessions = [];
-  for (const key of selectedKeys) {
+  for (let i = 0; i < selected.length; i++) {
     try {
-      const s = await connectWallet(key);
-      if (s) sessions.push(s);
+      const s = await login(selected[i]);
+      console.log(`[${i + 1}/${selected.length}] ${s.address} | Energy: ${s.user.energy}/${s.user.energyCapacity}`);
+      sessions.push(s);
     } catch (e) {
-      console.error(`[!] Login error: ${e.message}`);
+      console.error(`[${i + 1}/${selected.length}] Login error: ${e.message}`);
     }
-    await sleep(LOGIN_DELAY);
+    await sleep(1500);
   }
 
-  console.log(`\n[*] ${sessions.length}/${selectedKeys.length} logged in. Starting mining...`);
+  console.log(`\n${sessions.length}/${selected.length} berhasil login`);
+  console.log(`\nMode:`);
+  console.log(`  1. Mine  - start mining`);
+  console.log(`  2. Claim - claim reward`);
 
-  // Jalankan semua parallel
-  await Promise.all(sessions.map(s => mineLoop(s)));
+  const action = await prompt('\nPilih (1/2): ');
+  if (action === '1') await modeMine(sessions);
+  else if (action === '2') await modeClaim(sessions);
+  else console.log('[!] Invalid');
 }
 
 main().catch(console.error);
