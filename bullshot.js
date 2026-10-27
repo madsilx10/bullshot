@@ -233,21 +233,30 @@ async function doTasks(session, tag, twitterHandle, questMode, twCreds, acctIdx)
     : (raw.weekly || []);
 
   const allowed = WHITELIST[questMode] || [];
-  const doable = pool.filter(q => allowed.includes(q.id) && q.status === 'available');
+  const doable = pool.filter(q =>
+    allowed.includes(q.id) &&
+    ['available', 'in_progress', 'started', 'ready', 'pending'].includes(q.status)
+  );
 
   if (doable.length === 0) {
     console.log(`${tag} [Quest] Semua ${questMode} quest selesai`);
+    pool.filter(q => allowed.includes(q.id))
+        .forEach(q => console.log(`${tag}   └ ${q.id}: ${q.status}`));
     return;
   }
 
   for (const quest of doable) {
     const qid = quest.id;
     try {
-      // Start
-      const started = await api('POST', '/api/quests/start', { questId: qid }, address, token);
-      const wait = (started.delaySeconds || started.secondsLeft || 10) + 2;
-      console.log(`${tag} [Quest] Started: ${quest.title} | wait ${wait}s`);
-      await sleep(wait * 1000);
+      // Start hanya kalau masih available
+      if (quest.status === 'available') {
+        const started = await api('POST', '/api/quests/start', { questId: qid }, address, token);
+        const wait = (started.delaySeconds || started.secondsLeft || 10) + 2;
+        console.log(`${tag} [Quest] Started: ${quest.title} | wait ${wait}s`);
+        await sleep(wait * 1000);
+      } else {
+        console.log(`${tag} [Quest] Resume: ${quest.title} (${quest.status})`);
+      }
 
       // Handle verify_tweet quests (butuh tweet URL)
       let tweetUrl = '';
