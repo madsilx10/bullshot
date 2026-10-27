@@ -80,15 +80,27 @@ async function modeMine(sessions) {
         console.log(`  → Already mining: ${soonest.locationName} | ${soonest.remainingSeconds}s left`);
       } else {
         const locations = await api('GET', '/api/mining/locations', null, address, token);
-        const stats = await api('GET', '/api/mining/stats', null, address, token);
-        const loc = pickLocation(locations, stats.energy, stats.miningPower);
+        let stats = await api('GET', '/api/mining/stats', null, address, token);
+        let started = 0;
 
-        if (!loc) {
-          console.log(`  → No location available (energy: ${stats.energy})`);
-        } else {
-          await api('POST', '/api/mining/positions', { locationId: loc.id }, address, token);
-          console.log(`  → Started: ${loc.name} | ${loc.durationSeconds}s | -${loc.energyCost} energy`);
+        while (true) {
+          const loc = pickLocation(locations, stats.energy, stats.miningPower);
+          if (!loc) {
+            if (started === 0) console.log(`  → No location available (energy: ${stats.energy})`);
+            break;
+          }
+          try {
+            await api('POST', '/api/mining/positions', { locationId: loc.id }, address, token);
+            started++;
+            console.log(`  → [${started}] Started: ${loc.name} | ${loc.durationSeconds}s | -${loc.energyCost} energy`);
+            stats.energy -= loc.energyCost;
+            await sleep(500);
+          } catch (e) {
+            console.log(`  → Stop: ${e.message}`);
+            break;
+          }
         }
+        if (started > 0) console.log(`  → Total started: ${started} position(s)`);
       }
     } catch (e) {
       console.error(`${num} Error: ${e.message}`);
@@ -166,6 +178,12 @@ async function main() {
   if (scope === '1') from = parseInt(await prompt(`Nomor akun (1-${keys.length}): `));
   else if (scope === '3') from = parseInt(await prompt(`Mulai dari nomor (1-${keys.length}): `));
 
+  console.log(`\nMode:`);
+  console.log(`  1. Mine  - start mining`);
+  console.log(`  2. Claim - claim reward`);
+  const action = await prompt('\nPilih (1/2): ');
+  if (!['1','2'].includes(action)) { console.log('[!] Invalid'); return; }
+
   const selected = selectKeys(keys, scope, from);
   console.log(`\n→ Login ${selected.length} wallet...`);
 
@@ -182,14 +200,8 @@ async function main() {
   }
 
   console.log(`\n${sessions.length}/${selected.length} berhasil login`);
-  console.log(`\nMode:`);
-  console.log(`  1. Mine  - start mining`);
-  console.log(`  2. Claim - claim reward`);
-
-  const action = await prompt('\nPilih (1/2): ');
   if (action === '1') await modeMine(sessions);
-  else if (action === '2') await modeClaim(sessions);
-  else console.log('[!] Invalid');
+  else await modeClaim(sessions);
 }
 
 main().catch(console.error);
