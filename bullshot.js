@@ -3,12 +3,80 @@ const fs = require('fs');
 const readline = require('readline');
 
 const BASE_URL = 'https://gemapi.bullshot.io';
-const REF_CODE = '0x413c3593';
+const REF_CODE  = '0x413c3593';
+const TW_BEARER = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+const BULLSHOT_TWEET = 'https://twitter.com/Bullshot911/status/2114813596278604001';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const randomDelay = (min = 3000, max = 8000) => sleep(min + Math.random() * (max - min));
 const accountDelay = () => sleep(2000 + Math.random() * 4000);
 
+// ─── TWEET TEXTS ─────────────────────────────────────────────────────────────
+const WEEKLY_POST_TEXTS = [
+  ref => `Another solid week stacking GEMS and upgrading miners on @Bullshot911! ⚒️🔥\n\nBull GEM on Base is easily the smoothest idle miner right now. Check it out: https://gem.bullshot.io/r/${ref}\n\n#Bullshot #BullGems #BaseChain`,
+  ref => `Weekly grind secured! Mining GEMS nonstop with @Bullshot911 on Base ⛏️💎\n\nIf you're not mining Bull GEM yet, you're missing out: https://gem.bullshot.io/r/${ref}\n\n#BullGems #Bullshot #BaseChain`,
+  ref => `Stack week complete! GEMS keep rolling in on @Bullshot911 ⚒️🔥\n\nBull GEM on Base hits different. Jump in: https://gem.bullshot.io/r/${ref}\n\n#Bullshot #BullGems #Base`,
+  ref => `Another week, another bag of GEMS from @Bullshot911! 💎⛏️\n\nIdling has never been this rewarding. Start mining: https://gem.bullshot.io/r/${ref}\n\n#BullGems #BaseChain #Bullshot`,
+  ref => `Weekly miners report: GEMS stacked, upgrades done, vibes immaculate 🔥⚒️\n\nJoin me on @Bullshot911 Bull GEM: https://gem.bullshot.io/r/${ref}\n\n#Bullshot #BullGems #BaseChain`,
+  ref => `7 days deep in the quarry with @Bullshot911. GEMS don't stop ⛏️🔥\n\nGet in early: https://gem.bullshot.io/r/${ref}\n\n#BullGems #Bullshot #Base`,
+  ref => `Miner grind never sleeps with @Bullshot911! Week after week on Base 💎⚒️\n\nStart here: https://gem.bullshot.io/r/${ref}\n\n#Bullshot #BullGems #BaseChain`,
+];
+
+const WEEKLY_QRT_TEXTS = [
+  ref => `Mining deep in the quarries with @Bullshot911! Don't sleep on Bull Gems on Base ⚒️💎\nhttps://gem.bullshot.io/r/${ref} #Bullshot`,
+  ref => `Still going strong in the mines! @Bullshot911 keeping the GEMS flowing 🔥⛏️\nhttps://gem.bullshot.io/r/${ref} #BullGems`,
+  ref => `Can't stop won't stop mining with @Bullshot911 💎⚒️ Bull GEM on Base is the play\nhttps://gem.bullshot.io/r/${ref} #Bullshot`,
+  ref => `Weekly check-in from the quarry! @Bullshot911 delivering every week 🔥\nhttps://gem.bullshot.io/r/${ref} #BullGems #BaseChain`,
+  ref => `Gems don't stop with @Bullshot911! Base chain mining at its finest ⛏️💎\nhttps://gem.bullshot.io/r/${ref} #Bullshot`,
+  ref => `Another week grinding GEMS alongside @Bullshot911 on Base 🔥⚒️\nhttps://gem.bullshot.io/r/${ref} #BullGems`,
+  ref => `@Bullshot911 never misses. Weekly GEMS secured 💎 Bull GEM on Base\nhttps://gem.bullshot.io/r/${ref} #Bullshot #BaseChain`,
+];
+
+// ─── PARSE AKUN.TXT ───────────────────────────────────────────────────────────
+function parseAkun() {
+  if (!fs.existsSync('akun.txt')) return [];
+  const raw = fs.readFileSync('akun.txt', 'utf-8').trim();
+  const blocks = raw.split(/\n\s*\n/);
+  return blocks.map(b => {
+    const lines = b.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    return { authToken: lines[0] || '', ct0: lines[1] || '' };
+  }).filter(a => a.authToken && a.ct0);
+}
+
+// ─── TWITTER POST ─────────────────────────────────────────────────────────────
+async function postTweet(authToken, ct0, text, attachUrl = null) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const params = new URLSearchParams({ status: text });
+    if (attachUrl) params.append('attachment_url', attachUrl);
+
+    const res = await fetch('https://api.twitter.com/1.1/statuses/update.json', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${TW_BEARER}`,
+        'Cookie': `auth_token=${authToken}; ct0=${ct0}`,
+        'X-Csrf-Token': ct0,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+        'Origin': 'https://twitter.com',
+        'Referer': 'https://twitter.com/',
+        'X-Twitter-Active-User': 'yes',
+        'X-Twitter-Auth-Type': 'OAuth2Session',
+      },
+      body: params.toString(),
+      signal: ctrl.signal,
+    });
+
+    const data = await res.json();
+    if (!data.id_str) throw new Error(data.errors?.[0]?.message || `HTTP ${res.status}`);
+    const username = data.user?.screen_name || 'unknown';
+    const url = `https://x.com/${username}/status/${data.id_str}?s=20`;
+    return url;
+  } finally { clearTimeout(to); }
+}
+
+// ─── BULLSHOT API ─────────────────────────────────────────────────────────────
 function getHeaders(address = '', token = '') {
   return {
     'Content-Type': 'application/json',
@@ -64,7 +132,7 @@ function pickLocation(locations, energy, miningPower) {
 }
 
 async function doMining(session, tag) {
-  const { address, token, user } = session;
+  const { address, token } = session;
 
   const positions = await api('GET', '/api/mining/positions', null, address, token);
   const active = positions.filter(p => p.status === 'active');
@@ -103,8 +171,10 @@ async function doMining(session, tag) {
 }
 
 // ─── TASK ─────────────────────────────────────────────────────────────────────
-async function doTasks(session, tag, twitterHandle) {
+// questMode: 'daily' | 'weekly'
+async function doTasks(session, tag, twitterHandle, questMode, twCreds, acctIdx) {
   const { address, token, user } = session;
+  const refCode = user.refCode || REF_CODE;
 
   // Link twitter kalau belum
   if (twitterHandle && !user.twitterHandle) {
@@ -126,34 +196,54 @@ async function doTasks(session, tag, twitterHandle) {
     return;
   }
 
-  // Flatten daily + weekly + oneTime, skip verify_tweet (butuh URL asli)
-  const allQuests = [
-    ...(raw.daily   || []),
-    ...(raw.weekly  || []),
-    ...(raw.oneTime || []),
-  ];
+  const WHITELIST = {
+    daily:  ['daily_miner_signin', 'tw_daily_engage'],
+    weekly: ['tw_weekly_post', 'tw_weekly_qrt'],
+  };
 
-  const QUEST_WHITELIST = ['daily_miner_signin', 'tw_daily_engage'];
+  const pool = questMode === 'daily'
+    ? (raw.daily  || [])
+    : (raw.weekly || []);
 
-  const doable = allQuests.filter(q =>
-    QUEST_WHITELIST.includes(q.id) &&
-    q.status === 'available'
-  );
+  const allowed = WHITELIST[questMode] || [];
+  const doable = pool.filter(q => allowed.includes(q.id) && q.status === 'available');
 
   if (doable.length === 0) {
-    console.log(`${tag} [Quest] All done / nothing to do`);
+    console.log(`${tag} [Quest] Semua ${questMode} quest selesai`);
     return;
   }
 
   for (const quest of doable) {
     const qid = quest.id;
     try {
+      // Start
       const started = await api('POST', '/api/quests/start', { questId: qid }, address, token);
       const wait = (started.delaySeconds || started.secondsLeft || 10) + 2;
       console.log(`${tag} [Quest] Started: ${quest.title} | wait ${wait}s`);
       await sleep(wait * 1000);
 
-      const claimed = await api('POST', '/api/quests/claim', { questId: qid, tweetUrl: '' }, address, token);
+      // Handle verify_tweet quests (butuh tweet URL)
+      let tweetUrl = '';
+      if (quest.actionType === 'verify_tweet') {
+        if (!twCreds?.authToken) {
+          console.log(`${tag} [Quest] Skip ${quest.title} — no twitter creds`);
+          continue;
+        }
+        const textFn = qid === 'tw_weekly_post'
+          ? WEEKLY_POST_TEXTS[acctIdx % WEEKLY_POST_TEXTS.length]
+          : WEEKLY_QRT_TEXTS[acctIdx % WEEKLY_QRT_TEXTS.length];
+
+        const text = textFn(refCode);
+        const attachUrl = qid === 'tw_weekly_qrt' ? BULLSHOT_TWEET : null;
+
+        console.log(`${tag} [Tweet] Posting for ${qid}...`);
+        tweetUrl = await postTweet(twCreds.authToken, twCreds.ct0, text, attachUrl);
+        console.log(`${tag} [Tweet] Posted: ${tweetUrl}`);
+        await sleep(3000);
+      }
+
+      // Claim
+      const claimed = await api('POST', '/api/quests/claim', { questId: qid, tweetUrl }, address, token);
       console.log(`${tag} [Quest] Claimed: ${quest.title} | +${claimed.reward?.gems || 0} GEMS +${claimed.reward?.xp || 0} XP`);
     } catch (e) {
       console.log(`${tag} [Quest] ${quest.title} error: ${e.message}`);
@@ -203,9 +293,9 @@ function prompt(q) {
 }
 
 function selectKeys(keys, scope, from) {
-  if (scope === '1') return [keys[from - 1]];
-  if (scope === '3') return keys.slice(from - 1);
-  return keys;
+  if (scope === '1') return [{ key: keys[from - 1], idx: from - 1 }];
+  if (scope === '3') return keys.slice(from - 1).map((k, i) => ({ key: k, idx: from - 1 + i }));
+  return keys.map((k, i) => ({ key: k, idx: i }));
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -217,9 +307,13 @@ async function main() {
     ? fs.readFileSync('usn.txt', 'utf-8').split('\n').map(l => l.trim().replace(/^@/, '')).filter(Boolean)
     : [];
 
-  console.log(`Wallets : ${keys.length}`);
-  console.log(`Usernames: ${usernames.length}`);
+  const akunList = parseAkun();
 
+  console.log(`Wallets  : ${keys.length}`);
+  console.log(`Usernames: ${usernames.length}`);
+  console.log(`Akun tw  : ${akunList.length}`);
+
+  // Pilih scope
   console.log(`\nAkun:`);
   console.log(`  1. 1 akun`);
   console.log(`  2. Semua`);
@@ -229,6 +323,7 @@ async function main() {
   if (scope === '1') from = parseInt(await prompt(`Nomor akun (1-${keys.length}): `));
   else if (scope === '3') from = parseInt(await prompt(`Mulai dari nomor (1-${keys.length}): `));
 
+  // Pilih mode
   console.log(`\nMode:`);
   console.log(`  1. Mining + Task`);
   console.log(`  2. Mining`);
@@ -237,19 +332,28 @@ async function main() {
   const mode = await prompt('\nPilih (1/2/3/4): ');
   if (!['1','2','3','4'].includes(mode)) { console.log('[!] Invalid'); return; }
 
-  // Ambil keys yang dipilih + index aslinya (untuk match usn.txt)
-  const allSelected = (() => {
-    if (scope === '1') return [{ key: keys[from - 1], idx: from - 1 }];
-    if (scope === '3') return keys.slice(from - 1).map((k, i) => ({ key: k, idx: from - 1 + i }));
-    return keys.map((k, i) => ({ key: k, idx: i }));
-  })();
+  // Pilih sub-mode task kalau mode 1 atau 4
+  let questMode = null;
+  if (mode === '1' || mode === '4') {
+    console.log(`\nTask mode:`);
+    console.log(`  1. Daily`);
+    console.log(`  2. Weekly`);
+    const tm = await prompt('\nPilih (1/2): ');
+    questMode = tm === '2' ? 'weekly' : 'daily';
+  }
 
+  // Ambil selected
+  const allSelected = selectKeys(keys, scope, from);
+
+  // Login
   console.log(`\n→ Login ${allSelected.length} wallet...`);
   const sessions = [];
   for (const { key, idx } of allSelected) {
     try {
       const s = await login(key);
-      s.username = usernames[idx] || null;
+      s.username  = usernames[idx] || null;
+      s.twCreds   = akunList[idx]  || null;
+      s.acctIdx   = idx;
       console.log(`[${sessions.length + 1}/${allSelected.length}] ${s.address} | Energy: ${s.user.energy}/${s.user.energyCapacity} | Twitter: ${s.user.twitterHandle || '-'}`);
       sessions.push(s);
     } catch (e) {
@@ -269,14 +373,14 @@ async function main() {
       if (mode === '1') {
         await doMining(s, tag);
         await randomDelay();
-        await doTasks(s, tag, s.username);
+        await doTasks(s, tag, s.username, questMode, s.twCreds, s.acctIdx);
       } else if (mode === '2') {
         await doMining(s, tag);
       } else if (mode === '3') {
         const gems = await doClaim(s, tag);
         totalGems += gems;
       } else if (mode === '4') {
-        await doTasks(s, tag, s.username);
+        await doTasks(s, tag, s.username, questMode, s.twCreds, s.acctIdx);
       }
     } catch (e) {
       console.error(`${tag} Error: ${e.message}`);
