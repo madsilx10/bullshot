@@ -70,8 +70,7 @@ async function doMining(session, tag) {
   const active = positions.filter(p => p.status === 'active');
   if (active.length > 0) {
     const soonest = active.sort((a, b) => a.remainingSeconds - b.remainingSeconds)[0];
-    console.log(`${tag} Already mining: ${soonest.locationName} | ${soonest.remainingSeconds}s left`);
-    return;
+    console.log(`${tag} Active: ${active.length} position(s) | soonest done in ${soonest.remainingSeconds}s`);
   }
 
   const [locations, stats] = await Promise.all([
@@ -127,8 +126,12 @@ async function doTasks(session, tag, twitterHandle) {
     return;
   }
 
+  // Handle berbagai shape response
   if (!Array.isArray(quests)) {
-    console.log(`${tag} [Quest] Unexpected response`);
+    quests = quests.quests || quests.data || quests.list || Object.values(quests);
+  }
+  if (!Array.isArray(quests)) {
+    console.log(`${tag} [Quest] Unexpected response shape`);
     return;
   }
 
@@ -228,8 +231,9 @@ async function main() {
   console.log(`  1. Mining + Task`);
   console.log(`  2. Mining`);
   console.log(`  3. Claim`);
-  const mode = await prompt('\nPilih (1/2/3): ');
-  if (!['1','2','3'].includes(mode)) { console.log('[!] Invalid'); return; }
+  console.log(`  4. Task`);
+  const mode = await prompt('\nPilih (1/2/3/4): ');
+  if (!['1','2','3','4'].includes(mode)) { console.log('[!] Invalid'); return; }
 
   // Ambil keys yang dipilih + index aslinya (untuk match usn.txt)
   const allSelected = (() => {
@@ -269,6 +273,8 @@ async function main() {
       } else if (mode === '3') {
         const gems = await doClaim(s, tag);
         totalGems += gems;
+      } else if (mode === '4') {
+        await doTasks(s, tag, s.username);
       }
     } catch (e) {
       console.error(`${tag} Error: ${e.message}`);
