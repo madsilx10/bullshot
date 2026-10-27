@@ -225,7 +225,7 @@ async function doTasks(session, tag, twitterHandle, questMode, twCreds, acctIdx)
 
   const WHITELIST = {
     daily:  ['daily_miner_signin', 'tw_daily_engage'],
-    weekly: ['tw_weekly_post', 'tw_weekly_qrt'],
+    weekly: ['tw_weekly_post', 'tw_weekly_qrt', 'weekly_miner_checkin'],
   };
 
   const pool = questMode === 'daily'
