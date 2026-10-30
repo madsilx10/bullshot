@@ -275,6 +275,9 @@ async function doTasks(session, tag, twitterHandle, questMode, twCreds, acctIdx)
         console.log(`${tag} [Tweet] Posting for ${qid}...`);
         tweetUrl = await postTweet(twCreds.authToken, twCreds.ct0, text, attachUrl);
         console.log(`${tag} [Tweet] Posted: ${tweetUrl}`);
+        if (qid === 'tw_weekly_qrt') {
+          fs.appendFileSync('qrt_urls.txt', `${address}|${tweetUrl}\n`);
+        }
         await sleep(3000);
       }
 
